@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include "main.h"
 
-#define num_of_run 100
+#define num_of_run 1
 
 using namespace std;
 void initial(void);
@@ -48,13 +48,19 @@ int main(int argc, char* argv[])
     for(int i = 0; i < num_of_run; i++){
         initial();
         RDTSC(t0);
+        printf("gasFilter\n");
         gausFilter(img);
         
         //Function: gradient magnitude and direction computing
+        printf("gradientForm\n");
         gradientForm(img,1);
+        printf("nms\n");
         nms(magGrad, dirGrad);//nms
+        printf("histoBuild\n");
         histoBuild(magGradOut);//build histogram array.
+        printf("fill\n");
         fill(magGradOut,magGradOut3,1,5);
+        printf("thresHolding\n");
         thresHolding(magGradOut3, 0, 30);//threshold 0.3
         RDTSC(t1);
         sum += (long long)COUNTER_DIFF(t1, t0, CYCLES);

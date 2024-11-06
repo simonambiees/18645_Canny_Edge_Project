@@ -1,8 +1,6 @@
-//canny_kernel.cpp
+//canny.cpp
 
 #include "canny.h"
-#include <immintrin.h> 
-#include <cstddef>
 //global 2d array for writing
 int magGrad[H][W];
 int magGradX[H][W];
@@ -54,70 +52,6 @@ bool convol(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
 	
 	return 1;
 }
-
-
-// Convol with simd
-
-// bool convol(int* array, int sizeArray[2], int* op, int sizeOp[2], int stride) {
-//     size_t rowArray = sizeArray[0];
-//     size_t colArray = sizeArray[1];
-//     size_t rowOp = sizeOp[0];
-//     size_t colOp = sizeOp[1];
-    
-//     // Assuming tmpConvArray is globally defined and has enough space
-//     for (int i = 0; i < rowArray; i += stride) {
-//         for (int j = 0; j < colArray; j += stride) {
-//             tmpConvArray[i][j] = 0;
-//             if (i < rowOp / 2 || i >= rowArray - rowOp / 2 || j < colOp / 2 || j >= colArray - colOp / 2) {
-//                 continue;
-//             }
-
-//             // Set initial SIMD sum to zero
-//             __m128i sum = _mm_setzero_si128();
-
-//             // Loop over the operator with SIMD loading
-// 			// print current pixel id
-// 			printf("i: %d/%d, j: %d/%d\n", i, rowArray, j, colArray);
-//             int q;
-//             for (int p = 0; p < rowOp; ++p) {
-//                 for (q = 0; q <= colOp - 4; q += 4) { // Process 4 elements at a time
-//                     int* arrayPtr = &array[(i + p - rowOp / 2) * colArray + (j + q - colOp / 2)];
-// 					// printf("1 ");
-//                     int* opPtr = &op[p * colOp + q];
-// 					// printf("2 ");
-                    
-//                     // Load 4 pixels and 4 operator values
-//                     __m128i arrayVal = _mm_loadu_si128((__m128i*)arrayPtr);
-// 					// printf("3 ");
-//                     __m128i opVal = _mm_loadu_si128((__m128i*)opPtr);
-// 					// printf("4 ");
-                    
-//                     // Multiply and accumulate
-//                     __m128i mulRes = _mm_mullo_epi32(arrayVal, opVal);
-// 					// printf("5 ");
-//                     sum = _mm_add_epi32(sum, mulRes);
-// 					// printf("6 \n");
-//                 }
-                
-//                 // Handle remaining elements if colOp is not divisible by 4
-//                 for (; q < colOp; ++q) {
-//                     int arrayVal = array[(i + p - rowOp / 2) * colArray + (j + q - colOp / 2)];
-//                     int opVal = op[p * colOp + q];
-//                     tmpConvArray[i][j] += arrayVal * opVal;
-//                 }
-//             }
-            
-//             // Horizontal sum of SIMD vector to get partial result
-//             sum = _mm_hadd_epi32(sum, sum);
-//             sum = _mm_hadd_epi32(sum, sum);
-//             tmpConvArray[i][j] += _mm_extract_epi32(sum, 0); // Combine with scalar sum
-//         }
-//     }
-
-//     return true;
-// }
-
-
 
 // for guassian filter, may blur the image a bit but improve our overall edge detecting effect
 bool gausFilter(int(&array)[H][W])

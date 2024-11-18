@@ -3,6 +3,7 @@
 #include "canny.h"
 #include <immintrin.h> 
 #include <cstddef>
+#include "rdtsc.h"
 //global 2d array for writing
 int magGrad[H][W];
 int magGradX[H][W];
@@ -56,73 +57,311 @@ bool convol(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
 }
 
 
-// Convol with simd
+bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
+{
+	// i,j: output image index
+	// m,n: kernel index
+	// p,q: input image index
+	// stride is always 1 in this case
 
-// bool convol(int* array, int sizeArray[2], int* op, int sizeOp[2], int stride) {
-//     size_t rowArray = sizeArray[0];
-//     size_t colArray = sizeArray[1];
-//     size_t rowOp = sizeOp[0];
-//     size_t colOp = sizeOp[1];
-    
-//     // Assuming tmpConvArray is globally defined and has enough space
-//     for (int i = 0; i < rowArray; i += stride) {
-//         for (int j = 0; j < colArray; j += stride) {
-//             tmpConvArray[i][j] = 0;
-//             if (i < rowOp / 2 || i >= rowArray - rowOp / 2 || j < colOp / 2 || j >= colArray - colOp / 2) {
-//                 continue;
-//             }
+	size_t rowArray = sizeArray[0];
+	size_t colArray = sizeArray[1];
+	size_t rowOp = sizeOp[0];
+	size_t colOp = sizeOp[1];
+	size_t rowOpHalf = rowOp / 2;
+	size_t colOpHalf = colOp / 2;
+	size_t rowOutput = rowArray - 2 * rowOpHalf;
+	size_t colOutput = colArray - 2 * colOpHalf;
+	// printf("rowArray: %d, colArray: %d\n", rowArray, colArray);
+	// printf("rowOp: %d, colOp: %d\n", rowOp, colOp);
+	// printf("rowOutput: %d, colOutput: %d\n", rowOutput, colOutput);
 
-//             // Set initial SIMD sum to zero
-//             __m128i sum = _mm_setzero_si128();
+	// zero-pad the input image so that the output col_size is a multiple of 40
+	// this is to make the SIMD implementation easier
+	// TODO
+	// Or choose image size wisely to avoid padding
+	// make one output col_size 40k, where k is an integer
+	// the other output col_size 40k + 4
+	// image size 4006x3024
+	// test image size 46x30
 
-//             // Loop over the operator with SIMD loading
-// 			// print current pixel id
-// 			printf("i: %d/%d, j: %d/%d\n", i, rowArray, j, colArray);
-//             int q;
-//             for (int p = 0; p < rowOp; ++p) {
-//                 for (q = 0; q <= colOp - 4; q += 4) { // Process 4 elements at a time
-//                     int* arrayPtr = &array[(i + p - rowOp / 2) * colArray + (j + q - colOp / 2)];
-// 					// printf("1 ");
-//                     int* opPtr = &op[p * colOp + q];
-// 					// printf("2 ");
-                    
-//                     // Load 4 pixels and 4 operator values
-//                     __m128i arrayVal = _mm_loadu_si128((__m128i*)arrayPtr);
-// 					// printf("3 ");
-//                     __m128i opVal = _mm_loadu_si128((__m128i*)opPtr);
-// 					// printf("4 ");
-                    
-//                     // Multiply and accumulate
-//                     __m128i mulRes = _mm_mullo_epi32(arrayVal, opVal);
-// 					// printf("5 ");
-//                     sum = _mm_add_epi32(sum, mulRes);
-// 					// printf("6 \n");
-//                 }
-                
-//                 // Handle remaining elements if colOp is not divisible by 4
-//                 for (; q < colOp; ++q) {
-//                     int arrayVal = array[(i + p - rowOp / 2) * colArray + (j + q - colOp / 2)];
-//                     int opVal = op[p * colOp + q];
-//                     tmpConvArray[i][j] += arrayVal * opVal;
-//                 }
-//             }
-            
-//             // Horizontal sum of SIMD vector to get partial result
-//             sum = _mm_hadd_epi32(sum, sum);
-//             sum = _mm_hadd_epi32(sum, sum);
-//             tmpConvArray[i][j] += _mm_extract_epi32(sum, 0); // Combine with scalar sum
-//         }
-//     }
+	// Initialize the output image to zero
+	int* output = new int[rowOutput * colOutput]();
 
-//     return true;
-// }
+
+	// Loop over every pixel in the output image
+	// calculating 40 outputs at a time
+	for (int i=0; i<rowOutput; i++) { // 1 row at a time
+		for (int j=0; j<colOutput/40*40; j=j+40) { // 40 columns at a time
+			// Maybe initialize the output to zero here?
+
+			// Loop over every pixel in the kernel
+			for (int m=0; m<rowOp; m++) {
+				for (int n=0; n<colOp; n++) {
+					// Calculate the start of the chunk of the input image
+					// that corresponds to the kernel pixel
+					int p = i + m;
+					int q = j + n;
+
+					// Load (40/4 = 10) SIMD registers for output image
+					// Load the output image chunk of 40 pixels at a time
+					// convert output image value from int to double
+					__m256d sum_0 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j]));
+					__m256d sum_1 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 4]));
+					__m256d sum_2 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 8]));
+					__m256d sum_3 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 12]));
+					__m256d sum_4 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 16]));
+					__m256d sum_5 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 20]));
+					__m256d sum_6 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 24]));
+					__m256d sum_7 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 28]));
+					__m256d sum_8 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 32]));
+					__m256d sum_9 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 36]));
+
+
+					// Load the kernel value
+					// convert kernel value from int to double
+					// broad cast the kernel value to all elements in the SIMD register
+					__m256d kernel = _mm256_set1_pd(static_cast<double>(op[m * colOp + n]));
+
+					// Load the input image chunk of 4 pixels at a time
+					// convert input image value from int to double
+					// load 4 pixels into a SIMD register
+					__m256d input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q]));
+					__m256d input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 4]));
+					__m256d input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 8]));
+					__m256d input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 12]));
+					__m256d input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 16]));
+					sum_0 = _mm256_fmadd_pd(input_a, kernel, sum_0);
+					sum_1 = _mm256_fmadd_pd(input_b, kernel, sum_1);
+					sum_2 = _mm256_fmadd_pd(input_c, kernel, sum_2);
+					sum_3 = _mm256_fmadd_pd(input_d, kernel, sum_3);
+					sum_4 = _mm256_fmadd_pd(input_e, kernel, sum_4);
+					input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 20]));
+					input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 24]));
+					input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 28]));
+					input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 32]));
+					input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 36]));
+					sum_5 = _mm256_fmadd_pd(input_a, kernel, sum_5);
+					sum_6 = _mm256_fmadd_pd(input_b, kernel, sum_6);
+					sum_7 = _mm256_fmadd_pd(input_c, kernel, sum_7);
+					sum_8 = _mm256_fmadd_pd(input_d, kernel, sum_8);
+					sum_9 = _mm256_fmadd_pd(input_e, kernel, sum_9);
+
+					// Store results back into the output image
+					// convert double to int
+					// store 4 pixels back to the output image
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j], _mm256_cvttpd_epi32(sum_0));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 4], _mm256_cvttpd_epi32(sum_1));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 8], _mm256_cvttpd_epi32(sum_2));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 12], _mm256_cvttpd_epi32(sum_3));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 16], _mm256_cvttpd_epi32(sum_4));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 20], _mm256_cvttpd_epi32(sum_5));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 24], _mm256_cvttpd_epi32(sum_6));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 28], _mm256_cvttpd_epi32(sum_7));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 32], _mm256_cvttpd_epi32(sum_8));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 36], _mm256_cvttpd_epi32(sum_9));
+					
+				}
+			}
+		}
+
+		// Handle remaining elements if colOp is not divisible by 40
+		if (colOutput % 40 != 0) {
+			for (int j = colOutput - colOutput % 40; j < colOutput; j++) {
+				for (int m = 0; m < rowOp; m++) {
+					for (int n = 0; n < colOp; n++) {
+						output[i * colOutput + j] += array[(i + m) * colArray + (j + n)] * op[m * colOp + n];
+					}
+				}
+			}
+		}
+	}
+
+	// Copy the output image back to the global tmp array
+	for (int i=0; i<rowArray; i++) {
+		for (int j=0; j<colArray; j++) {
+			if (i < rowOpHalf || i >= rowArray - rowOpHalf || j < colOpHalf || j >= colArray - colOpHalf) {
+				tmpConvArray[i][j] = 0;
+			}
+			else {
+				tmpConvArray[i][j] = output[(i-rowOpHalf) * colOutput + (j-colOpHalf)];
+			}
+		}
+	}
+
+	return 1;
+}
+
+
+double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
+{
+	// i,j: output image index
+	// m,n: kernel index
+	// p,q: input image index
+	// stride is always 1 in this case
+
+	size_t rowArray = sizeArray[0];
+	size_t colArray = sizeArray[1];
+	size_t rowOp = sizeOp[0];
+	size_t colOp = sizeOp[1];
+	size_t rowOpHalf = rowOp / 2;
+	size_t colOpHalf = colOp / 2;
+	size_t rowOutput = rowArray - 2 * rowOpHalf;
+	size_t colOutput = colArray - 2 * colOpHalf;
+
+	tsc_counter t0, t1;
+	long long sum_cycle = 0;
+	long long sum_inst = 0;
+	double tp = 0.0;
+
+	// zero-pad the input image so that the output col_size is a multiple of 40
+	// this is to make the SIMD implementation easier
+	// TODO
+	// Or choose image size wisely to avoid padding
+	// make one output col_size 40k, where k is an integer
+	// the other output col_size 40k + 4
+	// image size 4006x3024
+	// test image size 46x30
+
+	// Initialize the output image to zero
+	int* output = new int[rowOutput * colOutput]();
+
+
+	// Loop over every pixel in the output image
+	// calculating 40 outputs at a time
+	for (int i=0; i<rowOutput; i++) { // 1 row at a time
+		for (int j=0; j<colOutput/40*40; j=j+40) { // 40 columns at a time
+			// Maybe initialize the output to zero here?
+
+			// Loop over every pixel in the kernel
+			for (int m=0; m<rowOp; m++) {
+				for (int n=0; n<colOp; n++) {
+					// Calculate the start of the chunk of the input image
+					// that corresponds to the kernel pixel
+					int p = i + m;
+					int q = j + n;
+
+					// Load (40/4 = 10) SIMD registers for output image
+					// Load the output image chunk of 40 pixels at a time
+					// convert output image value from int to double
+					__m256d sum_0 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j]));
+					__m256d sum_1 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 4]));
+					__m256d sum_2 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 8]));
+					__m256d sum_3 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 12]));
+					__m256d sum_4 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 16]));
+					__m256d sum_5 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 20]));
+					__m256d sum_6 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 24]));
+					__m256d sum_7 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 28]));
+					__m256d sum_8 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 32]));
+					__m256d sum_9 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 36]));
+
+
+					// Load the kernel value
+					// convert kernel value from int to double
+					// broad cast the kernel value to all elements in the SIMD register
+					__m256d kernel = _mm256_set1_pd(static_cast<double>(op[m * colOp + n]));
+
+					// Load the input image chunk of 4 pixels at a time
+					// convert input image value from int to double
+					// load 4 pixels into a SIMD register
+					__m256d input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q]));
+					__m256d input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 4]));
+					__m256d input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 8]));
+					__m256d input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 12]));
+					__m256d input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 16]));
+					RDTSC(t0);
+					sum_0 = _mm256_fmadd_pd(input_a, kernel, sum_0);
+					sum_1 = _mm256_fmadd_pd(input_b, kernel, sum_1);
+					sum_2 = _mm256_fmadd_pd(input_c, kernel, sum_2);
+					sum_3 = _mm256_fmadd_pd(input_d, kernel, sum_3);
+					sum_4 = _mm256_fmadd_pd(input_e, kernel, sum_4);
+					RDTSC(t1);
+					sum_cycle += (long long)COUNTER_DIFF(t1, t0, CYCLES);
+					input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 20]));
+					input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 24]));
+					input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 28]));
+					input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 32]));
+					input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 36]));
+					RDTSC(t0);
+					sum_5 = _mm256_fmadd_pd(input_a, kernel, sum_5);
+					sum_6 = _mm256_fmadd_pd(input_b, kernel, sum_6);
+					sum_7 = _mm256_fmadd_pd(input_c, kernel, sum_7);
+					sum_8 = _mm256_fmadd_pd(input_d, kernel, sum_8);
+					sum_9 = _mm256_fmadd_pd(input_e, kernel, sum_9);
+					RDTSC(t1);
+					sum_cycle += (long long)COUNTER_DIFF(t1, t0, CYCLES);
+					sum_inst += 10;
+
+					// Store results back into the output image
+					// convert double to int
+					// store 4 pixels back to the output image
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j], _mm256_cvttpd_epi32(sum_0));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 4], _mm256_cvttpd_epi32(sum_1));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 8], _mm256_cvttpd_epi32(sum_2));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 12], _mm256_cvttpd_epi32(sum_3));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 16], _mm256_cvttpd_epi32(sum_4));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 20], _mm256_cvttpd_epi32(sum_5));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 24], _mm256_cvttpd_epi32(sum_6));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 28], _mm256_cvttpd_epi32(sum_7));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 32], _mm256_cvttpd_epi32(sum_8));
+					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 36], _mm256_cvttpd_epi32(sum_9));
+					
+				}
+			}
+		}
+
+		// Handle remaining elements if colOp is not divisible by 40
+		if (colOutput % 40 != 0) {
+			for (int j = colOutput - colOutput % 40; j < colOutput; j++) {
+				for (int m = 0; m < rowOp; m++) {
+					for (int n = 0; n < colOp; n++) {
+						output[i * colOutput + j] += array[(i + m) * colArray + (j + n)] * op[m * colOp + n];
+					}
+				}
+			}
+		}
+	}
+
+	// Copy the output image back to the global tmp array
+	for (int i=0; i<rowArray; i++) {
+		for (int j=0; j<colArray; j++) {
+			if (i < rowOpHalf || i >= rowArray - rowOpHalf || j < colOpHalf || j >= colArray - colOpHalf) {
+				tmpConvArray[i][j] = 0;
+			}
+			else {
+				tmpConvArray[i][j] = output[(i-rowOpHalf) * colOutput + (j-colOpHalf)];
+			}
+		}
+	}
+
+	// return throughput
+	tp = (double)sum_inst / (double)sum_cycle;
+	return tp;
+}
+
+double convol_kernel_bench_wrapper(int(&array)[H][W])
+{
+	int sizeImg[2] = {H,W};
+	int sizeOp[2] = {GAUS_SIZE,GAUS_SIZE};
+	double tp = 0.0;
+
+	for (int i = 0; i < H; i++)
+	{
+		for (int j = 0; j < W; j++)
+		{
+			oneDImgArray[i * W + j] = array[i][j] ;
+		}
+	}
+	tp = convol_kernel_benchmark(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
+	return tp;
+}
 
 
 
 // for guassian filter, may blur the image a bit but improve our overall edge detecting effect
 bool gausFilter(int(&array)[H][W])
 {
-	
+	// printf("rowArray: %d, colArray: %d\n", H, W);
 	int sizeImg[2] = {H,W};
 	int sizeOp[2] = {GAUS_SIZE,GAUS_SIZE};
 	// cout << "start gaussian filtering:" <<endl;
@@ -136,8 +375,30 @@ bool gausFilter(int(&array)[H][W])
 			oneDImgArray[i * W + j] = array[i][j] ;
 		}
 	}
-    
+    // printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
 	convol(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
+	fill(tmpConvArray, img, 140, 3);
+	return 1;
+}
+
+bool gausFilter_SIMD(int(&array)[H][W])
+{
+	// printf("rowArray: %d, colArray: %d\n", H, W);
+	int sizeImg[2] = {H,W};
+	int sizeOp[2] = {GAUS_SIZE,GAUS_SIZE};
+	// cout << "start gaussian filtering:" <<endl;
+    
+    //since my convolution fucntion code was done in a 1d array
+    // transform 2d to 1 d
+	for (int i = 0; i < H; i++)
+	{
+		for (int j = 0; j < W; j++)
+		{
+			oneDImgArray[i * W + j] = array[i][j] ;
+		}
+	}
+    // printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
+	convol_kernel(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
 	fill(tmpConvArray, img, 140, 3);
 	return 1;
 }
@@ -147,6 +408,7 @@ bool gradientForm(int(&array)[H][W],int opType)
 {
   	int rowArray = H;
 	int colArray = W;
+	// printf("rowArray: %d, colArray: %d\n", rowArray, colArray);
 	int xGrad = 0;
 	int yGrad = 0;
 	if (opType == 0)
@@ -179,10 +441,76 @@ bool gradientForm(int(&array)[H][W],int opType)
 			}
 		}
         //Gx
+		// printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
 		convol(oneDImgArray, sizeImg, OP_PEWITT_X, sizeOp, 1);
 		fill(tmpConvArray, magGradX,1,4);
         //Gy
 		convol(oneDImgArray, sizeImg, OP_PEWITT_Y, sizeOp, 1);
+		fill(tmpConvArray, magGradY,1,4);
+        
+        // make sure no pixel has a value larger than 255 (maximum of our greyscale)
+		for (int i = 0; i < rowArray; i++)
+		{
+			for (int j = 0; j < colArray; j++)
+			{
+				if (abs(magGradX[i][j]) + abs(magGradY[i][j]) > 255) {
+					magGrad[i][j] = 255;
+				}
+				else 
+				{
+                    //magnitude
+					magGrad[i][j] = abs(magGradX[i][j]) + abs(magGradY[i][j]);	
+				}
+                //direction
+				dirGrad[i][j] = angle_class(atan2(magGradY[i][j], magGradX[i][j]) / PI * 180);
+			}
+		}
+    }
+	return 1;
+}
+
+bool gradientForm_SIMD(int(&array)[H][W],int opType)
+{
+  	int rowArray = H;
+	int colArray = W;
+	// printf("rowArray: %d, colArray: %d\n", rowArray, colArray);
+	int xGrad = 0;
+	int yGrad = 0;
+	if (opType == 0)
+    { //naive way for gradient magnitude computation Gy = y[j]-y[j-1]
+        for (int i = 1; i < rowArray; i++)
+		{
+			for (int j = 1; j < colArray; j++)
+			{
+				//int sizeOp[2] = { GAUS_SIZE,GAUS_SIZE };
+				xGrad = array[i][j] - array[i][j - 1];
+				yGrad = array[i][j] - array[i - 1][j];
+				magGradY[i][j] = yGrad;
+				magGradX[i][j] = xGrad;
+				magGrad[i][j] = sqrt(yGrad * yGrad + xGrad * xGrad);
+				dirGrad[i][j] = angle_class(atan2(yGrad, xGrad) / PI * 180);
+			}
+		}
+	}
+	else if (opType == 1)
+	{
+        // We use pewitt operator and convlution to do gradient computing
+		int sizeImg[2] = { H,W };
+		int sizeOp[2] = { 3,3 };
+        //convolution
+		for (int i = 0; i < H; i++)
+		{
+			for (int j = 0; j < W; j++)
+			{
+				oneDImgArray[i*W + j] = array[i][j];
+			}
+		}
+        //Gx
+		// printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
+		convol_kernel(oneDImgArray, sizeImg, OP_PEWITT_X, sizeOp, 1);
+		fill(tmpConvArray, magGradX,1,4);
+        //Gy
+		convol_kernel(oneDImgArray, sizeImg, OP_PEWITT_Y, sizeOp, 1);
 		fill(tmpConvArray, magGradY,1,4);
         
         // make sure no pixel has a value larger than 255 (maximum of our greyscale)

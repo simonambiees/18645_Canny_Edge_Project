@@ -11,8 +11,11 @@ using namespace std;
 
 //bool convol(int(&array)[H][W], double(&op)[GAUS_SIZE][GAUS_SIZE], int);
 bool convol(int* array, int sizeImg[2], int* op, int sizeOp[2], int);
+double convol_kernel_bench_wrapper(int(&array)[H][W]);
 bool gausFilter(int(&array)[H][W]);
 bool gradientForm(int(&array)[H][W],int);
+bool gausFilter_SIMD(int(&array)[H][W]);
+bool gradientForm_SIMD(int(&array)[H][W],int);
 int angle_class(double);
 bool nms(int(&magArray)[H][W], int(&dirArray)[H][W]);
 bool thresHolding(int(&magArray)[H][W],bool, int);

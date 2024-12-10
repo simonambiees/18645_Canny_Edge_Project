@@ -11,6 +11,7 @@ using namespace std;
 
 //bool convol(int(&array)[H][W], double(&op)[GAUS_SIZE][GAUS_SIZE], int);
 bool convol(int* array, int sizeImg[2], int* op, int sizeOp[2], int);
+double convol_bench_wrapper(int(&array)[H][W]);
 double convol_kernel_bench_wrapper(int(&array)[H][W]);
 bool gausFilter(int(&array)[H][W]);
 bool gradientForm(int(&array)[H][W],int);

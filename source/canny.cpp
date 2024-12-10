@@ -56,8 +56,65 @@ bool convol(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
 	return 1;
 }
 
+double convol_benchmark(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
+{
+	size_t rowArray = sizeArray[0];
+	size_t colArray = sizeArray[1];
+	size_t rowOp = sizeOp[0];
+	size_t colOp = sizeOp[1];
 
-bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
+	tsc_counter t0, t1;
+	long long sum_cycle = 0;
+	long long sum_inst = 0;
+	double cycles = 0.0;
+
+	RDTSC(t0);
+	for (int i = 0; i < rowArray ; i = i + stride)
+	{
+		for (int j = 0; j < colArray ; j = j + stride)
+		{
+            // use a temporary global array to transfer data
+            // not a optimum way but working.
+			tmpConvArray[i][j] = 0;
+			if (i <rowOp / 2 || i >= rowArray - rowOp / 2 || j <colOp / 2 || j >= colArray - colOp / 2)
+			{
+				continue;
+			}
+			for (int p = i - rowOp / 2; p < i + rowOp / 2+1; p++)
+			{
+				for (int q = j - colOp / 2; q < j + colOp / 2+1; q++)
+				{
+					tmpConvArray [i][j] += array[p * colArray + q] * op[(p - (i - rowOp / 2)) * colOp + (q - (j - colOp / 2))];
+				}
+			}
+		}
+	}
+	RDTSC(t1);
+	sum_cycle += (long long)COUNTER_DIFF(t1, t0, CYCLES);
+	
+	// return cpu cycles
+	cycles = (double)sum_cycle;
+	return cycles;
+}
+
+double convol_bench_wrapper(int(&array)[H][W])
+{
+	int sizeImg[2] = {H,W};
+	int sizeOp[2] = {GAUS_SIZE,GAUS_SIZE};
+	double cycles = 0.0;
+
+	for (int i = 0; i < H; i++)
+	{
+		for (int j = 0; j < W; j++)
+		{
+			oneDImgArray[i * W + j] = array[i][j] ;
+		}
+	}
+	cycles = convol_benchmark(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
+	return cycles;
+}
+
+bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2],int stride)
 {
 	// i,j: output image index
 	// m,n: kernel index
@@ -86,7 +143,7 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 	// test image size 46x30
 
 	// Initialize the output image to zero
-	int* output = new int[rowOutput * colOutput]();
+	double* output = new double[rowOutput * colOutput]();
 
 
 	// Loop over every pixel in the output image
@@ -94,6 +151,18 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 	for (int i=0; i<rowOutput; i++) { // 1 row at a time
 		for (int j=0; j<colOutput/40*40; j=j+40) { // 40 columns at a time
 			// Maybe initialize the output to zero here?
+			// Load (40/4 = 10) SIMD registers for output image
+			// Load the output image chunk of 40 pixels at a time
+			__m256d sum_0 = _mm256_loadu_pd(&output[i * colOutput + j]);
+			__m256d sum_1 = _mm256_loadu_pd(&output[i * colOutput + j + 4]);
+			__m256d sum_2 = _mm256_loadu_pd(&output[i * colOutput + j + 8]);
+			__m256d sum_3 = _mm256_loadu_pd(&output[i * colOutput + j + 12]);
+			__m256d sum_4 = _mm256_loadu_pd(&output[i * colOutput + j + 16]);
+			__m256d sum_5 = _mm256_loadu_pd(&output[i * colOutput + j + 20]);
+			__m256d sum_6 = _mm256_loadu_pd(&output[i * colOutput + j + 24]);
+			__m256d sum_7 = _mm256_loadu_pd(&output[i * colOutput + j + 28]);
+			__m256d sum_8 = _mm256_loadu_pd(&output[i * colOutput + j + 32]);
+			__m256d sum_9 = _mm256_loadu_pd(&output[i * colOutput + j + 36]);
 
 			// Loop over every pixel in the kernel
 			for (int m=0; m<rowOp; m++) {
@@ -103,44 +172,28 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 					int p = i + m;
 					int q = j + n;
 
-					// Load (40/4 = 10) SIMD registers for output image
-					// Load the output image chunk of 40 pixels at a time
-					// convert output image value from int to double
-					__m256d sum_0 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j]));
-					__m256d sum_1 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 4]));
-					__m256d sum_2 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 8]));
-					__m256d sum_3 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 12]));
-					__m256d sum_4 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 16]));
-					__m256d sum_5 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 20]));
-					__m256d sum_6 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 24]));
-					__m256d sum_7 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 28]));
-					__m256d sum_8 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 32]));
-					__m256d sum_9 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 36]));
-
-
 					// Load the kernel value
-					// convert kernel value from int to double
 					// broad cast the kernel value to all elements in the SIMD register
-					__m256d kernel = _mm256_set1_pd(static_cast<double>(op[m * colOp + n]));
+					__m256d kernel = _mm256_set1_pd(op[m * colOp + n]);
 
 					// Load the input image chunk of 4 pixels at a time
 					// convert input image value from int to double
 					// load 4 pixels into a SIMD register
-					__m256d input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q]));
-					__m256d input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 4]));
-					__m256d input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 8]));
-					__m256d input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 12]));
-					__m256d input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 16]));
+					__m256d input_a = _mm256_loadu_pd(&array[p * colArray + q]);
+					__m256d input_b = _mm256_loadu_pd(&array[p * colArray + q + 4]);
+					__m256d input_c = _mm256_loadu_pd(&array[p * colArray + q + 8]);
+					__m256d input_d = _mm256_loadu_pd(&array[p * colArray + q + 12]);
+					__m256d input_e = _mm256_loadu_pd(&array[p * colArray + q + 16]);
 					sum_0 = _mm256_fmadd_pd(input_a, kernel, sum_0);
 					sum_1 = _mm256_fmadd_pd(input_b, kernel, sum_1);
 					sum_2 = _mm256_fmadd_pd(input_c, kernel, sum_2);
 					sum_3 = _mm256_fmadd_pd(input_d, kernel, sum_3);
 					sum_4 = _mm256_fmadd_pd(input_e, kernel, sum_4);
-					input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 20]));
-					input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 24]));
-					input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 28]));
-					input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 32]));
-					input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 36]));
+					input_a = _mm256_loadu_pd(&array[p * colArray + q + 20]);
+					input_b = _mm256_loadu_pd(&array[p * colArray + q + 24]);
+					input_c = _mm256_loadu_pd(&array[p * colArray + q + 28]);
+					input_d = _mm256_loadu_pd(&array[p * colArray + q + 32]);
+					input_e = _mm256_loadu_pd(&array[p * colArray + q + 36]);
 					sum_5 = _mm256_fmadd_pd(input_a, kernel, sum_5);
 					sum_6 = _mm256_fmadd_pd(input_b, kernel, sum_6);
 					sum_7 = _mm256_fmadd_pd(input_c, kernel, sum_7);
@@ -148,18 +201,16 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 					sum_9 = _mm256_fmadd_pd(input_e, kernel, sum_9);
 
 					// Store results back into the output image
-					// convert double to int
-					// store 4 pixels back to the output image
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j], _mm256_cvttpd_epi32(sum_0));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 4], _mm256_cvttpd_epi32(sum_1));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 8], _mm256_cvttpd_epi32(sum_2));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 12], _mm256_cvttpd_epi32(sum_3));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 16], _mm256_cvttpd_epi32(sum_4));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 20], _mm256_cvttpd_epi32(sum_5));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 24], _mm256_cvttpd_epi32(sum_6));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 28], _mm256_cvttpd_epi32(sum_7));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 32], _mm256_cvttpd_epi32(sum_8));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 36], _mm256_cvttpd_epi32(sum_9));
+					_mm256_storeu_pd(&output[i * colOutput + j], sum_0);
+					_mm256_storeu_pd(&output[i * colOutput + j + 4], sum_1);
+					_mm256_storeu_pd(&output[i * colOutput + j + 8], sum_2);
+					_mm256_storeu_pd(&output[i * colOutput + j + 12], sum_3);
+					_mm256_storeu_pd(&output[i * colOutput + j + 16], sum_4);
+					_mm256_storeu_pd(&output[i * colOutput + j + 20], sum_5);
+					_mm256_storeu_pd(&output[i * colOutput + j + 24], sum_6);
+					_mm256_storeu_pd(&output[i * colOutput + j + 28], sum_7);
+					_mm256_storeu_pd(&output[i * colOutput + j + 32], sum_8);
+					_mm256_storeu_pd(&output[i * colOutput + j + 36], sum_9);
 					
 				}
 			}
@@ -184,7 +235,7 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 				tmpConvArray[i][j] = 0;
 			}
 			else {
-				tmpConvArray[i][j] = output[(i-rowOpHalf) * colOutput + (j-colOpHalf)];
+				tmpConvArray[i][j] = static_cast<int>(output[(i-rowOpHalf) * colOutput + (j-colOpHalf)]);
 			}
 		}
 	}
@@ -193,7 +244,35 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 }
 
 
-double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
+// Converts image and op to doubles 
+// Wrapper function for convol_optimized
+bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
+{
+	double* inputImgArray = new double[sizeArray[0] * sizeArray[1]];
+	double inputOpArray[sizeOp[0] * sizeOp[1]];
+	double cycles = 0.0;
+
+	for (int i = 0; i < sizeArray[0]; i++)
+	{
+		for (int j = 0; j < sizeArray[1]; j++)
+		{
+			inputImgArray[i * sizeArray[1] + j] = static_cast<double>(array[i * sizeArray[1] + j]) ;
+		}
+	}
+	for (int i = 0; i < sizeOp[0]; i++)
+	{
+		for (int j = 0; j < sizeOp[1]; j++)
+		{
+			inputOpArray[i * sizeOp[1] + j] = static_cast<double>(givenGausFil[i * sizeOp[1] + j]);
+		}
+	}
+	bool result = convol_optimized(inputImgArray, sizeArray, inputOpArray, sizeOp, stride);
+	delete[] inputImgArray;
+	return result;
+}
+
+
+double convol_kernel_benchmark(double* array, int sizeArray[2], double* op, int sizeOp[2],int stride)
 {
 	// i,j: output image index
 	// m,n: kernel index
@@ -212,7 +291,7 @@ double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp
 	tsc_counter t0, t1;
 	long long sum_cycle = 0;
 	long long sum_inst = 0;
-	double tp = 0.0;
+	double cycles = 0.0;
 
 	// zero-pad the input image so that the output col_size is a multiple of 40
 	// this is to make the SIMD implementation easier
@@ -224,14 +303,26 @@ double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp
 	// test image size 46x30
 
 	// Initialize the output image to zero
-	int* output = new int[rowOutput * colOutput]();
+	double* output = new double[rowOutput * colOutput]();
 
-
+	RDTSC(t0);
 	// Loop over every pixel in the output image
 	// calculating 40 outputs at a time
 	for (int i=0; i<rowOutput; i++) { // 1 row at a time
 		for (int j=0; j<colOutput/40*40; j=j+40) { // 40 columns at a time
 			// Maybe initialize the output to zero here?
+			// Load (40/4 = 10) SIMD registers for output image
+			// Load the output image chunk of 40 pixels at a time
+			__m256d sum_0 = _mm256_loadu_pd(&output[i * colOutput + j]);
+			__m256d sum_1 = _mm256_loadu_pd(&output[i * colOutput + j + 4]);
+			__m256d sum_2 = _mm256_loadu_pd(&output[i * colOutput + j + 8]);
+			__m256d sum_3 = _mm256_loadu_pd(&output[i * colOutput + j + 12]);
+			__m256d sum_4 = _mm256_loadu_pd(&output[i * colOutput + j + 16]);
+			__m256d sum_5 = _mm256_loadu_pd(&output[i * colOutput + j + 20]);
+			__m256d sum_6 = _mm256_loadu_pd(&output[i * colOutput + j + 24]);
+			__m256d sum_7 = _mm256_loadu_pd(&output[i * colOutput + j + 28]);
+			__m256d sum_8 = _mm256_loadu_pd(&output[i * colOutput + j + 32]);
+			__m256d sum_9 = _mm256_loadu_pd(&output[i * colOutput + j + 36]);
 
 			// Loop over every pixel in the kernel
 			for (int m=0; m<rowOp; m++) {
@@ -241,70 +332,45 @@ double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp
 					int p = i + m;
 					int q = j + n;
 
-					// Load (40/4 = 10) SIMD registers for output image
-					// Load the output image chunk of 40 pixels at a time
-					// convert output image value from int to double
-					__m256d sum_0 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j]));
-					__m256d sum_1 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 4]));
-					__m256d sum_2 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 8]));
-					__m256d sum_3 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 12]));
-					__m256d sum_4 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 16]));
-					__m256d sum_5 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 20]));
-					__m256d sum_6 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 24]));
-					__m256d sum_7 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 28]));
-					__m256d sum_8 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 32]));
-					__m256d sum_9 = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&output[i * colOutput + j + 36]));
-
-
 					// Load the kernel value
-					// convert kernel value from int to double
 					// broad cast the kernel value to all elements in the SIMD register
-					__m256d kernel = _mm256_set1_pd(static_cast<double>(op[m * colOp + n]));
+					__m256d kernel = _mm256_set1_pd(op[m * colOp + n]);
 
 					// Load the input image chunk of 4 pixels at a time
 					// convert input image value from int to double
 					// load 4 pixels into a SIMD register
-					__m256d input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q]));
-					__m256d input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 4]));
-					__m256d input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 8]));
-					__m256d input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 12]));
-					__m256d input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 16]));
-					RDTSC(t0);
+					__m256d input_a = _mm256_loadu_pd(&array[p * colArray + q]);
+					__m256d input_b = _mm256_loadu_pd(&array[p * colArray + q + 4]);
+					__m256d input_c = _mm256_loadu_pd(&array[p * colArray + q + 8]);
+					__m256d input_d = _mm256_loadu_pd(&array[p * colArray + q + 12]);
+					__m256d input_e = _mm256_loadu_pd(&array[p * colArray + q + 16]);
 					sum_0 = _mm256_fmadd_pd(input_a, kernel, sum_0);
 					sum_1 = _mm256_fmadd_pd(input_b, kernel, sum_1);
 					sum_2 = _mm256_fmadd_pd(input_c, kernel, sum_2);
 					sum_3 = _mm256_fmadd_pd(input_d, kernel, sum_3);
 					sum_4 = _mm256_fmadd_pd(input_e, kernel, sum_4);
-					RDTSC(t1);
-					sum_cycle += (long long)COUNTER_DIFF(t1, t0, CYCLES);
-					input_a = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 20]));
-					input_b = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 24]));
-					input_c = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 28]));
-					input_d = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 32]));
-					input_e = _mm256_cvtepi32_pd(_mm_loadu_si128((__m128i*)&array[p * colArray + q + 36]));
-					RDTSC(t0);
+					input_a = _mm256_loadu_pd(&array[p * colArray + q + 20]);
+					input_b = _mm256_loadu_pd(&array[p * colArray + q + 24]);
+					input_c = _mm256_loadu_pd(&array[p * colArray + q + 28]);
+					input_d = _mm256_loadu_pd(&array[p * colArray + q + 32]);
+					input_e = _mm256_loadu_pd(&array[p * colArray + q + 36]);
 					sum_5 = _mm256_fmadd_pd(input_a, kernel, sum_5);
 					sum_6 = _mm256_fmadd_pd(input_b, kernel, sum_6);
 					sum_7 = _mm256_fmadd_pd(input_c, kernel, sum_7);
 					sum_8 = _mm256_fmadd_pd(input_d, kernel, sum_8);
 					sum_9 = _mm256_fmadd_pd(input_e, kernel, sum_9);
-					RDTSC(t1);
-					sum_cycle += (long long)COUNTER_DIFF(t1, t0, CYCLES);
-					sum_inst += 10;
 
 					// Store results back into the output image
-					// convert double to int
-					// store 4 pixels back to the output image
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j], _mm256_cvttpd_epi32(sum_0));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 4], _mm256_cvttpd_epi32(sum_1));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 8], _mm256_cvttpd_epi32(sum_2));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 12], _mm256_cvttpd_epi32(sum_3));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 16], _mm256_cvttpd_epi32(sum_4));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 20], _mm256_cvttpd_epi32(sum_5));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 24], _mm256_cvttpd_epi32(sum_6));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 28], _mm256_cvttpd_epi32(sum_7));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 32], _mm256_cvttpd_epi32(sum_8));
-					_mm_storeu_si128((__m128i*)&output[i * colOutput + j + 36], _mm256_cvttpd_epi32(sum_9));
+					_mm256_storeu_pd(&output[i * colOutput + j], sum_0);
+					_mm256_storeu_pd(&output[i * colOutput + j + 4], sum_1);
+					_mm256_storeu_pd(&output[i * colOutput + j + 8], sum_2);
+					_mm256_storeu_pd(&output[i * colOutput + j + 12], sum_3);
+					_mm256_storeu_pd(&output[i * colOutput + j + 16], sum_4);
+					_mm256_storeu_pd(&output[i * colOutput + j + 20], sum_5);
+					_mm256_storeu_pd(&output[i * colOutput + j + 24], sum_6);
+					_mm256_storeu_pd(&output[i * colOutput + j + 28], sum_7);
+					_mm256_storeu_pd(&output[i * colOutput + j + 32], sum_8);
+					_mm256_storeu_pd(&output[i * colOutput + j + 36], sum_9);
 					
 				}
 			}
@@ -321,6 +387,8 @@ double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp
 			}
 		}
 	}
+	RDTSC(t1);
+	sum_cycle += (long long)COUNTER_DIFF(t1, t0, CYCLES);
 
 	// Copy the output image back to the global tmp array
 	for (int i=0; i<rowArray; i++) {
@@ -334,26 +402,36 @@ double convol_kernel_benchmark(int* array, int sizeArray[2], int* op, int sizeOp
 		}
 	}
 
-	// return throughput
-	tp = (double)sum_inst / (double)sum_cycle;
-	return tp;
+	// return cpu cycles
+	cycles = (double)sum_cycle;
+	return cycles;
 }
 
 double convol_kernel_bench_wrapper(int(&array)[H][W])
 {
 	int sizeImg[2] = {H,W};
 	int sizeOp[2] = {GAUS_SIZE,GAUS_SIZE};
-	double tp = 0.0;
+	double* inputImgArray = new double[H * W];
+	double doubleGausFil[GAUS_SIZE*GAUS_SIZE];
+	double cycles = 0.0;
 
 	for (int i = 0; i < H; i++)
 	{
 		for (int j = 0; j < W; j++)
 		{
-			oneDImgArray[i * W + j] = array[i][j] ;
+			inputImgArray[i * W + j] = static_cast<double>(array[i][j]) ;
 		}
 	}
-	tp = convol_kernel_benchmark(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
-	return tp;
+	for (int i = 0; i < GAUS_SIZE; i++)
+	{
+		for (int j = 0; j < GAUS_SIZE; j++)
+		{
+			doubleGausFil[i * GAUS_SIZE + j] = static_cast<double>(givenGausFil[i * GAUS_SIZE + j]);
+		}
+	}
+	cycles = convol_kernel_benchmark(inputImgArray, sizeImg, doubleGausFil, sizeOp,1);
+	delete[] inputImgArray;
+	return cycles;
 }
 
 

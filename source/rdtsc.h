@@ -56,7 +56,7 @@ typedef union
 	#define CPUID() \
 		ASM VOLATILE ("cpuid" : : "a" (0) : "bx", "cx", "dx" )
 #endif
-	int rdtsc_works(void) {
+	inline int rdtsc_works(void) {
 		tsc_counter t0,t1;
 		RDTSC(t0);
 		RDTSC(t1);
@@ -95,7 +95,7 @@ typedef union
 	}
 
 #endif
-	int rdtsc_works(void) {
+	inline int rdtsc_works(void) {
 		tsc_counter t0,t1;
 		__try {
 		    RDTSC(t0);

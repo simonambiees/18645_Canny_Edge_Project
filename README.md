@@ -14,10 +14,11 @@ Structure
 4. test : test output history
 
 Instruction:
-```
+This project was developed on ece007. Please run on the same machine.
 Put your images in picIn folder. They must be bmp format.
 Open util.h, modify H and W to your image's resolution.
-Run "make -B"
-Run "./canny <image_file> <number of benchmark runs>"
+```
+make -B
+./canny.x <image_file> <number of benchmark runs>
 
 ```

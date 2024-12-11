@@ -14,10 +14,10 @@
 //zebra: 443*665(pad+3) 8
 //tiger: 354*630(pad+2) 24
 
-// #define H  3000
-// #define W 4006
+#define H  3000
 #define W 4006
-#define H 3000
+// #define W 46
+// #define H 30
 
 extern int num_Chn;
 extern int isRead;

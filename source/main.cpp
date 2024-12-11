@@ -74,6 +74,7 @@ int main(int argc, char* argv[])
         fill(magGradOut,magGradOut3,1,5);
         thresHolding(magGradOut3, 0, 30);
         RDTSC(t1);
+        if (i == 0) writeImg(pwdOut+nameIn,img);
         double cur_canny_cycles = (long long)COUNTER_DIFF(t1, t0, CYCLES);
         sum_canny_cycles += cur_canny_cycles;
         // Optimized canny run
@@ -85,6 +86,7 @@ int main(int argc, char* argv[])
         histoBuild(magGradOut);
         fill_opt(magGradOut,magGradOut3,1,5);
         thresHolding(magGradOut3, 0, 30);
+        if (i == 0) writeImg(pwdOut+"opt_"+nameIn,img);
         RDTSC(t1);
         double cur_canny_cycles_optimized = ((long long)COUNTER_DIFF(t1, t0, CYCLES)-int_conversion_cycles_counter);
         sum_canny_cycles_optimized += cur_canny_cycles_optimized;

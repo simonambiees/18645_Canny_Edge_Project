@@ -117,6 +117,8 @@ double convol_bench_wrapper(int(&array)[H][W])
 	return cycles;
 }
 
+
+// Optimized convolution function
 bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2],int stride)
 {
 	// i,j: output image index
@@ -251,7 +253,6 @@ bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2]
 	return 1;
 }
 
-
 // Converts image and op to doubles 
 // Wrapper function for convol_optimized
 bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
@@ -287,7 +288,6 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 	delete[] inputImgArray;
 	return result;
 }
-
 
 double convol_kernel_benchmark(double* array, int sizeArray[2], double* op, int sizeOp[2],int stride)
 {
@@ -450,7 +450,6 @@ double convol_kernel_bench_wrapper(int(&array)[H][W])
 	delete[] inputImgArray;
 	return cycles;
 }
-
 
 
 // for guassian filter, may blur the image a bit but improve our overall edge detecting effect

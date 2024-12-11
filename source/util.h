@@ -16,8 +16,8 @@
 
 // #define H  3000
 // #define W 4006
-#define H 3000
 #define W 4006
+#define H 3000
 
 extern int num_Chn;
 extern int isRead;

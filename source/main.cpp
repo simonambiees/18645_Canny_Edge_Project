@@ -10,8 +10,9 @@
 #include "main.h"
 #include "rdtsc.h"
 
-#define num_of_run 100
+int num_of_run = 1;
 
+double int_conversion_cycles_counter = 0.0;
 using namespace std;
 void initial(void);
 
@@ -23,6 +24,15 @@ int main(int argc, char* argv[])
     string pwd = "./";
     string pwdIn = pwd + "picIn/";
     string pwdOut = pwd+ "picOut/";
+    if (argc < 2)
+    {
+        cout << "Please provide the image name" << endl;
+        return 0;
+    }
+    if (argc == 3)
+    {
+        num_of_run = atoi(argv[2]);
+    }
 
     tsc_counter t0, t1;
     double sum_convol_cycles_optimized = 0.0;
@@ -33,6 +43,7 @@ int main(int argc, char* argv[])
     double average_canny_cycles_optimized = 0.0;
     double sum_canny_cycles = 0.0;
     double average_canny_cycles = 0.0;
+    double max_canny_speedup = 0.0;
 
     cout << "start processing" << endl;
     if (readImg(pwdIn+nameIn))
@@ -63,18 +74,25 @@ int main(int argc, char* argv[])
         fill(magGradOut,magGradOut3,1,5);
         thresHolding(magGradOut3, 0, 30);
         RDTSC(t1);
-        sum_canny_cycles += (long long)COUNTER_DIFF(t1, t0, CYCLES);
+        double cur_canny_cycles = (long long)COUNTER_DIFF(t1, t0, CYCLES);
+        sum_canny_cycles += cur_canny_cycles;
         // Optimized canny run
         initial();
         RDTSC(t0);
-        gausFilter_SIMD(img);
-        gradientForm_SIMD(img,1);
+        gausFilter_opt(img);
+        gradientForm_opt(img,1);
         nms(magGrad, dirGrad);
         histoBuild(magGradOut);
-        fill(magGradOut,magGradOut3,1,5);
+        fill_opt(magGradOut,magGradOut3,1,5);
         thresHolding(magGradOut3, 0, 30);
         RDTSC(t1);
-        sum_canny_cycles_optimized += (long long)COUNTER_DIFF(t1, t0, CYCLES);
+        double cur_canny_cycles_optimized = ((long long)COUNTER_DIFF(t1, t0, CYCLES)-int_conversion_cycles_counter);
+        sum_canny_cycles_optimized += cur_canny_cycles_optimized;
+
+        if (cur_canny_cycles / cur_canny_cycles_optimized > max_canny_speedup)
+        {
+            max_canny_speedup = cur_canny_cycles / cur_canny_cycles_optimized;
+        }
 
         // Isolating convolution kernel
         initial();
@@ -91,9 +109,9 @@ int main(int argc, char* argv[])
     printf("\nAverage CPU cycles (convol only)(Optimzied): %lf\nOver %d runs\n", average_convol_cycles_optimized, num_of_run);
     printf("\nAverage CPU cycles (canny full)(Raw): %lf\nOver %d runs\n", average_canny_cycles, num_of_run);
     printf("\nAverage CPU cycles (canny full)(Optimzied): %lf\nOver %d runs\n", average_canny_cycles_optimized, num_of_run);
-    // printf("\n%d runs\n\n", num_of_run);
-    // printf("Normal Raw Performance Average Count time: %lf cycles\n\n", average_cycle_normal);
-    // printf("SIMD Raw Performance Average Count time: %lf cycles\n\n", average_cycle_SIMD);
+    printf("\nSpeedup (convol): %lf\n", average_convol_cycles / average_convol_cycles_optimized);
+    printf("\nSpeedup (canny): %lf\n", average_canny_cycles / average_canny_cycles_optimized);
+    printf("\nSpeedup (Max)(canny): %lf\n", max_canny_speedup);
     
     cout<<"press any key to end:"<<endl;
     cin >> ch;
@@ -101,6 +119,7 @@ int main(int argc, char* argv[])
 
 //This function initializes all variables
 void initial(void){
+        int_conversion_cycles_counter = 0.0;
         memset(countTable, 0, sizeof(countTable));
         memset(oneDImgArray, 0, sizeof(oneDImgArray));
         memset(magGrad, 0, sizeof(magGrad));

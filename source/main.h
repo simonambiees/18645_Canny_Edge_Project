@@ -6,3 +6,5 @@
 #include "canny.h"
 #include "rdtsc.h"
 
+extern double int_conversion_cycles_counter;
+

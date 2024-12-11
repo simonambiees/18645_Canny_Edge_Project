@@ -15,13 +15,14 @@ double convol_bench_wrapper(int(&array)[H][W]);
 double convol_kernel_bench_wrapper(int(&array)[H][W]);
 bool gausFilter(int(&array)[H][W]);
 bool gradientForm(int(&array)[H][W],int);
-bool gausFilter_SIMD(int(&array)[H][W]);
-bool gradientForm_SIMD(int(&array)[H][W],int);
+bool gausFilter_opt(int(&array)[H][W]);
+bool gradientForm_opt(int(&array)[H][W],int);
 int angle_class(double);
 bool nms(int(&magArray)[H][W], int(&dirArray)[H][W]);
 bool thresHolding(int(&magArray)[H][W],bool, int);
 int myMax(int, int, int);
 bool fill(int(&array1)[H][W], int(&array2)[H][W],int div,int reduce);
+bool fill_opt(int(&array1)[H][W], int(&array2)[H][W],int div,int reduce);
 bool histoBuild(int(&array)[H][W]);
 
 extern int magGrad[H][W];

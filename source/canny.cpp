@@ -1,9 +1,12 @@
 //canny_kernel.cpp
 
 #include "canny.h"
+#include "main.h"
 #include <immintrin.h> 
 #include <cstddef>
 #include "rdtsc.h"
+#include <omp.h>
+
 //global 2d array for writing
 int magGrad[H][W];
 int magGradX[H][W];
@@ -121,6 +124,7 @@ bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2]
 	// p,q: input image index
 	// stride is always 1 in this case
 
+	tsc_counter t0, t1;
 	size_t rowArray = sizeArray[0];
 	size_t colArray = sizeArray[1];
 	size_t rowOp = sizeOp[0];
@@ -228,7 +232,9 @@ bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2]
 		}
 	}
 
+	RDTSC(t0);
 	// Copy the output image back to the global tmp array
+	#pragma omp parallel for collapse(2) num_threads(4)
 	for (int i=0; i<rowArray; i++) {
 		for (int j=0; j<colArray; j++) {
 			if (i < rowOpHalf || i >= rowArray - rowOpHalf || j < colOpHalf || j >= colArray - colOpHalf) {
@@ -239,6 +245,8 @@ bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2]
 			}
 		}
 	}
+	RDTSC(t1);
+	int_conversion_cycles_counter += (double)COUNTER_DIFF(t1, t0, CYCLES);
 
 	return 1;
 }
@@ -248,10 +256,13 @@ bool convol_optimized(double* array, int sizeArray[2], double* op, int sizeOp[2]
 // Wrapper function for convol_optimized
 bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stride)
 {
+	tsc_counter t0, t1;
 	double* inputImgArray = new double[sizeArray[0] * sizeArray[1]];
 	double inputOpArray[sizeOp[0] * sizeOp[1]];
 	double cycles = 0.0;
-
+	
+	RDTSC(t0);
+	#pragma omp parallel for collapse(2) num_threads(4)
 	for (int i = 0; i < sizeArray[0]; i++)
 	{
 		for (int j = 0; j < sizeArray[1]; j++)
@@ -259,6 +270,9 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 			inputImgArray[i * sizeArray[1] + j] = static_cast<double>(array[i * sizeArray[1] + j]) ;
 		}
 	}
+
+	
+	#pragma omp parallel for collapse(2) num_threads(4)
 	for (int i = 0; i < sizeOp[0]; i++)
 	{
 		for (int j = 0; j < sizeOp[1]; j++)
@@ -266,6 +280,9 @@ bool convol_kernel(int* array, int sizeArray[2], int* op, int sizeOp[2],int stri
 			inputOpArray[i * sizeOp[1] + j] = static_cast<double>(givenGausFil[i * sizeOp[1] + j]);
 		}
 	}
+	RDTSC(t1);
+	int_conversion_cycles_counter += (double)COUNTER_DIFF(t1, t0, CYCLES);
+	// printf("int_conversion_cycles_counter: %f\n", int_conversion_cycles_counter);
 	bool result = convol_optimized(inputImgArray, sizeArray, inputOpArray, sizeOp, stride);
 	delete[] inputImgArray;
 	return result;
@@ -455,11 +472,11 @@ bool gausFilter(int(&array)[H][W])
 	}
     // printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
 	convol(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
-	fill(tmpConvArray, img, 140, 3);
+	fill_opt(tmpConvArray, img, 140, 3);
 	return 1;
 }
 
-bool gausFilter_SIMD(int(&array)[H][W])
+bool gausFilter_opt(int(&array)[H][W])
 {
 	// printf("rowArray: %d, colArray: %d\n", H, W);
 	int sizeImg[2] = {H,W};
@@ -468,6 +485,7 @@ bool gausFilter_SIMD(int(&array)[H][W])
     
     //since my convolution fucntion code was done in a 1d array
     // transform 2d to 1 d
+	#pragma omp parallel for collapse(2) num_threads(4)
 	for (int i = 0; i < H; i++)
 	{
 		for (int j = 0; j < W; j++)
@@ -477,7 +495,7 @@ bool gausFilter_SIMD(int(&array)[H][W])
 	}
     // printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
 	convol_kernel(oneDImgArray, sizeImg, givenGausFil, sizeOp,1);
-	fill(tmpConvArray, img, 140, 3);
+	fill_opt(tmpConvArray, img, 140, 3);
 	return 1;
 }
 
@@ -521,10 +539,10 @@ bool gradientForm(int(&array)[H][W],int opType)
         //Gx
 		// printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
 		convol(oneDImgArray, sizeImg, OP_PEWITT_X, sizeOp, 1);
-		fill(tmpConvArray, magGradX,1,4);
+		fill_opt(tmpConvArray, magGradX,1,4);
         //Gy
 		convol(oneDImgArray, sizeImg, OP_PEWITT_Y, sizeOp, 1);
-		fill(tmpConvArray, magGradY,1,4);
+		fill_opt(tmpConvArray, magGradY,1,4);
         
         // make sure no pixel has a value larger than 255 (maximum of our greyscale)
 		for (int i = 0; i < rowArray; i++)
@@ -547,7 +565,7 @@ bool gradientForm(int(&array)[H][W],int opType)
 	return 1;
 }
 
-bool gradientForm_SIMD(int(&array)[H][W],int opType)
+bool gradientForm_opt(int(&array)[H][W],int opType)
 {
   	int rowArray = H;
 	int colArray = W;
@@ -556,6 +574,7 @@ bool gradientForm_SIMD(int(&array)[H][W],int opType)
 	int yGrad = 0;
 	if (opType == 0)
     { //naive way for gradient magnitude computation Gy = y[j]-y[j-1]
+	#pragma omp parallel for collapse(2) num_threads(4)
         for (int i = 1; i < rowArray; i++)
 		{
 			for (int j = 1; j < colArray; j++)
@@ -586,12 +605,13 @@ bool gradientForm_SIMD(int(&array)[H][W],int opType)
         //Gx
 		// printf("rowop: %d, colop: %d\n", sizeOp[0], sizeOp[1]);
 		convol_kernel(oneDImgArray, sizeImg, OP_PEWITT_X, sizeOp, 1);
-		fill(tmpConvArray, magGradX,1,4);
+		fill_opt(tmpConvArray, magGradX,1,4);
         //Gy
 		convol_kernel(oneDImgArray, sizeImg, OP_PEWITT_Y, sizeOp, 1);
-		fill(tmpConvArray, magGradY,1,4);
+		fill_opt(tmpConvArray, magGradY,1,4);
         
         // make sure no pixel has a value larger than 255 (maximum of our greyscale)
+		#pragma omp parallel for collapse(2) num_threads(4)
 		for (int i = 0; i < rowArray; i++)
 		{
 			for (int j = 0; j < colArray; j++)
@@ -925,6 +945,24 @@ int myMax(int a, int b, int c)
 //auxillary function for transforming 2d array to 1d
 bool fill(int(&array1)[H][W], int(&array2)[H][W],int div,int reduce)
 {
+	for (int i = reduce;i < H-reduce; i++)
+	{
+		for (int j = reduce; j < W-reduce; j++)
+		{
+			array2[i][j] = abs(array1[i][j])/div;
+			if(array2[i][j] > 255)
+			{
+				array2[i][j] = 0;
+			}
+		}
+	}
+	
+	return 1;
+}
+
+bool fill_opt(int(&array1)[H][W], int(&array2)[H][W],int div,int reduce)
+{
+	#pragma omp parallel for collapse(2) num_threads(4)
 	for (int i = reduce;i < H-reduce; i++)
 	{
 		for (int j = reduce; j < W-reduce; j++)
